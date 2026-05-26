@@ -1,0 +1,53 @@
+"""
+config.py - 전체 시스템 설정
+"""
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ─── 서버 설정 ─────────────────────────────────────────────
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", 8000))
+
+# ─── JWT 설정 ──────────────────────────────────────────────
+# 반드시 .env 파일에서 강력한 시크릿 키로 교체하세요!
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "CHANGE_THIS_SECRET_KEY_TO_SOMETHING_STRONG_AND_RANDOM")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = 12  # 토큰 만료 시간 (시간 단위)
+
+# ─── 어드민 계정 ────────────────────────────────────────────
+# 반드시 .env 파일에서 변경하세요!
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin1234!")  # bcrypt 해시 권장
+
+# ─── 데이터베이스 ───────────────────────────────────────────
+DB_PATH = os.getenv("DB_PATH", "data/music.db")
+
+# ─── 스트리밍 설정 ──────────────────────────────────────────
+# Linux: v4l2loopback 가상 카메라 디바이스
+VIRTUAL_CAMERA_DEVICE = os.getenv("VIRTUAL_CAMERA_DEVICE", "/dev/video0")
+
+# 방송 화면 해상도
+STREAM_WIDTH = int(os.getenv("STREAM_WIDTH", 1280))
+STREAM_HEIGHT = int(os.getenv("STREAM_HEIGHT", 720))
+STREAM_FPS = int(os.getenv("STREAM_FPS", 30))
+
+# 배경 이미지 경로 (방송 중 화면에 표시)
+BACKGROUND_IMAGE = os.getenv("BACKGROUND_IMAGE", "static/background.jpg")
+
+# yt-dlp 쿠키 파일 (유튜브 로그인 필요시)
+YTDLP_COOKIES = os.getenv("YTDLP_COOKIES", "")
+
+# ─── FRP 설정 ───────────────────────────────────────────────
+FRP_SERVER_ADDR = os.getenv("FRP_SERVER_ADDR", "your-vps-ip")
+FRP_SERVER_PORT = int(os.getenv("FRP_SERVER_PORT", 7000))
+FRP_TOKEN = os.getenv("FRP_TOKEN", "your-frp-auth-token")
+FRP_SUBDOMAIN = os.getenv("FRP_SUBDOMAIN", "music")
+
+# ─── 음악 방송 설정 ─────────────────────────────────────────
+# 한 곡당 버퍼 시간 (초) - 곡 사이 여유 시간
+SONG_BUFFER_SECONDS = int(os.getenv("SONG_BUFFER_SECONDS", 10))
+
+# 최대 대기열 곡 수
+MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", 50))

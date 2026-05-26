@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<title>Music Request</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #0d0f14;
+
+  --surface: #13161c;
+  --surface-2: #171b22;
+
+  --border: #252a33;
+  --border-hover: #343b47;
+
+  --text: #f3f5f7;
+  --muted: #8b93a7;
+
+  --accent: #5e6ad2;
+  --accent-hover: #707cf0;
+
+  --success: #30a46c;
+  --error: #e5484d;
+  --warn: #ffb224;
+
+  --radius: 12px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--bg);
+
+  color: var(--text);
+
+  font-family:
+    'Inter',
+    'Noto Sans KR',
+    sans-serif;
+
+  letter-spacing: -0.02em;
+
+  overflow-x: hidden;
+}
+
+/* ───────────────── HEADER ───────────────── */
+
+header {
+  position: sticky;
+  top: 0;
+
+  z-index: 100;
+
+  height: 56px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0 24px;
+
+  background:
+    rgba(13,15,20,.82);
+
+  backdrop-filter: blur(14px);
+
+  border-bottom:
+    1px solid var(--border);
+}
+
+.logo {
+  font-size: .9rem;
+  font-weight: 600;
+}
+
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  font-size: .8rem;
+
+  color: var(--muted);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+
+  border-radius: 999px;
+
+  background: #495061;
+}
+
+.live-dot.on {
+  background: var(--success);
+
+  box-shadow:
+    0 0 12px rgba(48,164,108,.45);
+}
+
+/* ───────────────── APP ───────────────── */
+
+.app {
+  display: grid;
+
+  grid-template-columns:
+    280px
+    minmax(0, 1fr);
+
+  min-height:
+    calc(100vh - 56px);
+}
+
+/* ───────────────── SIDEBAR ───────────────── */
+
+.sidebar {
+  border-right:
+    1px solid var(--border);
+
+  padding: 24px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.section-label {
+  margin-bottom: 12px;
+
+  font-size: .72rem;
+  font-weight: 600;
+
+  color: var(--muted);
+
+  letter-spacing: .08em;
+}
+
+.status-card {
+  background: var(--surface);
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 12px;
+
+  padding: 16px;
+}
+
+.status-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  margin-bottom: 10px;
+}
+
+.status-icon {
+  width: 32px;
+  height: 32px;
+
+  border-radius: 8px;
+
+  background: var(--surface-2);
+
+  border:
+    1px solid var(--border);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: .9rem;
+}
+
+.status-title {
+  font-size: .88rem;
+  font-weight: 600;
+}
+
+.status-sub {
+  font-size: .8rem;
+  line-height: 1.5;
+
+  color: var(--muted);
+}
+
+/* ───────────────── HISTORY ───────────────── */
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.req-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 10px;
+
+  border-radius: 10px;
+
+  border:
+    1px solid transparent;
+
+  transition:
+    background .15s ease,
+    border-color .15s ease;
+}
+
+.req-item:hover {
+  background:
+    rgba(255,255,255,.025);
+
+  border-color:
+    var(--border);
+}
+
+.req-item img {
+  width: 58px;
+  height: 40px;
+
+  object-fit: cover;
+
+  border-radius: 8px;
+
+  flex-shrink: 0;
+}
+
+.req-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.req-title {
+  font-size: .82rem;
+  font-weight: 500;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.req-sub {
+  margin-top: 3px;
+
+  font-size: .74rem;
+
+  color: var(--muted);
+}
+
+.status-badge {
+  height: 22px;
+
+  padding: 0 8px;
+
+  border-radius: 999px;
+
+  display: inline-flex;
+  align-items: center;
+
+  font-size: .68rem;
+  font-weight: 600;
+}
+
+.badge-pending {
+  background:
+    rgba(255,178,36,.1);
+
+  color: var(--warn);
+}
+
+.badge-approved {
+  background:
+    rgba(48,164,108,.1);
+
+  color: var(--success);
+}
+
+.badge-rejected {
+  background:
+    rgba(229,72,77,.1);
+
+  color: var(--error);
+}
+
+.empty-history {
+  color: var(--muted);
+
+  font-size: .82rem;
+
+  line-height: 1.6;
+}
+
+/* ───────────────── CONTENT ───────────────── */
+
+.content {
+  padding: 40px;
+}
+
+.content-inner {
+  max-width: 920px;
+}
+
+.page-label {
+  font-size: .72rem;
+  font-weight: 600;
+
+  color: var(--muted);
+
+  letter-spacing: .08em;
+
+  margin-bottom: 16px;
+}
+
+.form-card {
+  background: var(--surface);
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 14px;
+
+  padding: 32px;
+}
+
+.form-header {
+  margin-bottom: 32px;
+}
+
+.form-header h1 {
+  font-size: 2rem;
+  line-height: 1.05;
+  font-weight: 700;
+}
+
+.form-header p {
+  margin-top: 10px;
+
+  color: var(--muted);
+
+  font-size: .92rem;
+}
+
+/* ───────────────── GRID ───────────────── */
+
+.form-grid {
+  display: grid;
+
+  grid-template-columns:
+    180px
+    minmax(0, 1fr);
+
+  gap: 16px;
+
+  margin-bottom: 18px;
+}
+
+.field label {
+  display: block;
+
+  margin-bottom: 9px;
+
+  font-size: .74rem;
+  font-weight: 600;
+
+  color: var(--muted);
+
+  text-transform: uppercase;
+
+  letter-spacing: .08em;
+}
+
+.field input {
+  width: 100%;
+  height: 44px;
+
+  padding: 0 14px;
+
+  border: 1px solid var(--border);
+
+  border-radius: 10px;
+
+  background: var(--surface-2);
+
+  color: var(--text);
+
+  font-size: .92rem;
+
+  outline: none;
+
+  transition:
+    border-color .15s ease,
+    background .15s ease,
+    box-shadow .15s ease;
+}
+
+.field input:hover {
+  border-color:
+    var(--border-hover);
+}
+
+.field input:focus {
+  border-color:
+    var(--accent);
+
+  box-shadow:
+    0 0 0 3px rgba(94,106,210,.15);
+}
+
+.field input::placeholder {
+  color: #6d7483;
+}
+
+/* ───────────────── PREVIEW ───────────────── */
+
+#preview {
+  display: none;
+
+  align-items: center;
+  gap: 14px;
+
+  margin-top: 14px;
+
+  padding: 12px;
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 12px;
+
+  background: var(--surface-2);
+}
+
+#preview.show {
+  display: flex;
+}
+
+#preview img {
+  width: 88px;
+  height: 58px;
+
+  object-fit: cover;
+
+  border-radius: 8px;
+
+  flex-shrink: 0;
+}
+
+.preview-meta {
+  min-width: 0;
+}
+
+.preview-title {
+  font-size: .86rem;
+  line-height: 1.5;
+  font-weight: 500;
+
+  overflow: hidden;
+
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.preview-duration {
+  margin-top: 5px;
+
+  color: var(--muted);
+
+  font-size: .75rem;
+}
+
+.hint {
+  margin-top: 12px;
+
+  font-size: .78rem;
+
+  color: var(--muted);
+}
+
+/* ───────────────── ACTION ───────────────── */
+
+.action-row {
+  display: flex;
+  justify-content: flex-end;
+
+  margin-top: 24px;
+}
+
+.btn-submit {
+  height: 44px;
+
+  padding: 0 18px;
+
+  border: none;
+  border-radius: 10px;
+
+  background: var(--accent);
+
+  color: white;
+
+  font-size: .9rem;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  transition:
+    background .15s ease,
+    transform .08s ease,
+    opacity .15s ease;
+}
+
+.btn-submit:hover {
+  background:
+    var(--accent-hover);
+}
+
+.btn-submit:active {
+  transform: scale(.985);
+}
+
+.btn-submit:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* ───────────────── TOAST ───────────────── */
+
+.toast {
+  position: fixed;
+
+  left: 50%;
+  bottom: 24px;
+
+  transform:
+    translateX(-50%)
+    translateY(20px);
+
+  opacity: 0;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 14px 16px;
+
+  border-radius: 12px;
+
+  background: #11151b;
+
+  border:
+    1px solid var(--border);
+
+  transition:
+    opacity .18s ease,
+    transform .18s ease;
+
+  z-index: 999;
+}
+
+.toast.show {
+  opacity: 1;
+
+  transform:
+    translateX(-50%)
+    translateY(0);
+}
+
+.toast.success {
+  border-color:
+    rgba(48,164,108,.35);
+}
+
+.toast.error {
+  border-color:
+    rgba(229,72,77,.35);
+}
+
+/* ───────────────── SPINNER ───────────────── */
+
+.spinner {
+  width: 16px;
+  height: 16px;
+
+  border-radius: 999px;
+
+  border:
+    2px solid rgba(255,255,255,.25);
+
+  border-top-color: white;
+
+  animation:
+    spin .7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ───────────────── MOBILE ───────────────── */
+
+@media (max-width: 900px) {
+
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: none;
+
+    border-bottom:
+      1px solid var(--border);
+  }
+
+  .content {
+    padding: 24px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-header h1 {
+    font-size: 1.6rem;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="logo">
+    Music Request
+  </div>
+
+  <div class="live-badge">
+    <div
+      class="live-dot"
+      id="liveDot"
+    ></div>
+
+    <span id="liveText">
+      Checking
+    </span>
+  </div>
+</header>
+
+<div class="app">
+
+  <!-- SIDEBAR -->
+
+  <aside class="sidebar">
+
+    <section>
+
+      <div class="section-label">
+        STATUS
+      </div>
+
+      <div class="status-card">
+
+        <div class="status-top">
+
+          <div
+            class="status-icon"
+            id="statusIcon"
+          >
+            ●
+          </div>
+
+          <div
+            class="status-title"
+            id="statusTitle"
+          >
+            방송 상태 확인 중
+          </div>
+
+        </div>
+
+        <div
+          class="status-sub"
+          id="statusSub"
+        >
+          잠시만 기다려 주세요
+        </div>
+
+      </div>
+
+    </section>
+
+    <section>
+
+      <div class="section-label">
+        QUEUE
+      </div>
+
+      <div
+        class="history-list"
+        id="historyList"
+      >
+        <div class="empty-history">
+          아직 신청된 곡이 없습니다
+        </div>
+      </div>
+
+    </section>
+
+  </aside>
+
+  <!-- CONTENT -->
+
+  <main class="content">
+
+    <div class="content-inner">
+
+      <div class="page-label">
+        REQUEST
+      </div>
+
+      <div class="form-card">
+
+        <div class="form-header">
+          <h1>음악 신청</h1>
+
+          <p>
+            학번과 유튜브 링크를 입력해
+            음악을 신청하세요
+          </p>
+        </div>
+
+        <div class="form-grid">
+
+          <div class="field">
+            <label>
+              Student ID
+            </label>
+
+            <input
+              type="text"
+              id="studentId"
+              maxlength="5"
+              inputmode="numeric"
+              placeholder="12345"
+            />
+          </div>
+
+          <div class="field">
+
+            <label>
+              YouTube URL
+            </label>
+
+            <input
+              type="url"
+              id="youtubeUrl"
+              placeholder="https://youtube.com/watch?v="
+            />
+
+            <div id="preview">
+
+              <img
+                id="previewThumb"
+                src=""
+                alt=""
+              >
+
+              <div class="preview-meta">
+
+                <div
+                  class="preview-title"
+                  id="previewTitle"
+                ></div>
+
+                <div
+                  class="preview-duration"
+                  id="previewDur"
+                ></div>
+
+              </div>
+
+            </div>
+
+            <div class="hint">
+              유튜브 링크만 가능 ·
+              10분 이하 영상만 신청 가능
+            </div>
+
+          </div>
+
+        </div>
+
+        <div class="action-row">
+
+          <button
+            class="btn-submit"
+            id="submitBtn"
+            onclick="submitRequest()"
+          >
+            신청하기
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+</div>
+
+<!-- TOAST -->
+
+<div
+  class="toast"
+  id="toast"
+>
+  <span id="toastIcon">✓</span>
+  <span id="toastMsg"></span>
+</div>
+
+<script>
+const API = '';
+const sessionRequests = [];
+
+/* ───────────────── STATUS ───────────────── */
+
+async function checkStatus() {
+
+  try {
+
+    const r =
+      await fetch(`${API}/api/status`);
+
+    const d =
+      await r.json();
+
+    const dot =
+      document.getElementById('liveDot');
+
+    const liveText =
+      document.getElementById('liveText');
+
+    const statusIcon =
+      document.getElementById('statusIcon');
+
+    const statusTitle =
+      document.getElementById('statusTitle');
+
+    const statusSub =
+      document.getElementById('statusSub');
+
+    if (d.is_broadcasting) {
+
+      dot.className =
+        'live-dot on';
+
+      liveText.textContent =
+        'LIVE';
+
+      statusIcon.textContent =
+        '●';
+
+      statusTitle.textContent =
+        '방송 중';
+
+      statusSub.textContent =
+        d.current_song
+          ? d.current_song
+          : '음악 방송 진행 중';
+
+    } else if (d.schedule) {
+
+      dot.className =
+        'live-dot';
+
+      liveText.textContent =
+        'Scheduled';
+
+      statusIcon.textContent =
+        '○';
+
+      statusTitle.textContent =
+        '방송 예정';
+
+      statusSub.textContent =
+        `${d.schedule.start} — ${d.schedule.end}`;
+
+    } else {
+
+      dot.className =
+        'live-dot';
+
+      liveText.textContent =
+        'Offline';
+
+      statusIcon.textContent =
+        '—';
+
+      statusTitle.textContent =
+        '방송 없음';
+
+      statusSub.textContent =
+        '현재 예정된 방송이 없습니다';
+    }
+
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+/* ───────────────── PREVIEW ───────────────── */
+
+let previewTimer;
+
+document
+  .getElementById('youtubeUrl')
+  .addEventListener('input', e => {
+
+    clearTimeout(previewTimer);
+
+    const url =
+      e.target.value.trim();
+
+    if (!url) {
+      hidePreview();
+      return;
+    }
+
+    previewTimer =
+      setTimeout(() => {
+        showPreview(url);
+      }, 500);
+  });
+
+function hidePreview() {
+
+  document
+    .getElementById('preview')
+    .classList
+    .remove('show');
+}
+
+function showPreview(url) {
+
+  const match =
+    url.match(
+      /(?:youtu\.be\/|v=)([\w\-]{11})/
+    );
+
+  if (!match) {
+    hidePreview();
+    return;
+  }
+
+  const vid =
+    match[1];
+
+  document
+    .getElementById('previewThumb')
+    .src =
+      `https://img.youtube.com/vi/${vid}/mqdefault.jpg`;
+
+  document
+    .getElementById('previewTitle')
+    .textContent =
+      '';
+
+  document
+    .getElementById('previewDur')
+    .textContent =
+      '';
+
+  document
+    .getElementById('preview')
+    .classList
+    .add('show');
+}
+
+/* ───────────────── SUBMIT ───────────────── */
+
+async function submitRequest() {
+
+  const studentId =
+    document
+      .getElementById('studentId')
+      .value
+      .trim();
+
+  const youtubeUrl =
+    document
+      .getElementById('youtubeUrl')
+      .value
+      .trim();
+
+  const btn =
+    document
+      .getElementById('submitBtn');
+
+  if (!/^\d{5}$/.test(studentId)) {
+
+    showToast(
+      '✕',
+      '학번은 5자리 숫자여야 합니다',
+      'error'
+    );
+
+    return;
+  }
+
+  if (!youtubeUrl) {
+
+    showToast(
+      '✕',
+      '유튜브 링크를 입력해주세요',
+      'error'
+    );
+
+    return;
+  }
+
+  btn.disabled = true;
+
+  btn.innerHTML =
+    '<span class="spinner"></span>';
+
+  try {
+
+    const res =
+      await fetch(`${API}/api/request`, {
+
+        method: 'POST',
+
+        headers: {
+          'Content-Type':
+            'application/json'
+        },
+
+        body: JSON.stringify({
+          student_id: studentId,
+          youtube_url: youtubeUrl
+        })
+      });
+
+    const data =
+      await res.json();
+
+    if (!res.ok) {
+      throw new Error(
+        data.detail || '신청 실패'
+      );
+    }
+
+    showToast(
+      '✓',
+      data.message,
+      'success'
+    );
+
+    sessionRequests.unshift({
+      title: data.title,
+      duration: data.duration,
+      url: youtubeUrl,
+      status: 'pending',
+      id: data.id
+    });
+
+    renderHistory();
+
+    document
+      .getElementById('youtubeUrl')
+      .value = '';
+
+    hidePreview();
+
+  } catch (e) {
+
+    showToast(
+      '✕',
+      e.message,
+      'error'
+    );
+
+  } finally {
+
+    btn.disabled = false;
+
+    btn.innerHTML =
+      '신청하기';
+  }
+}
+
+/* ───────────────── HISTORY ───────────────── */
+
+function renderHistory() {
+
+  const list =
+    document.getElementById('historyList');
+
+  if (sessionRequests.length === 0) {
+
+    list.innerHTML = `
+      <div class="empty-history">
+        아직 신청된 곡이 없습니다
+      </div>
+    `;
+
+    return;
+  }
+
+  list.innerHTML =
+    sessionRequests.map(req => {
+
+      const match =
+        req.url.match(
+          /(?:youtu\.be\/|v=)([\w\-]{11})/
+        );
+
+      const thumb =
+        match
+          ? `https://img.youtube.com/vi/${match[1]}/mqdefault.jpg`
+          : '';
+
+      const dur =
+        req.duration
+          ? formatDur(req.duration)
+          : '';
+
+      const badge = {
+        pending:
+          '<span class="status-badge badge-pending">대기중</span>',
+
+        approved:
+          '<span class="status-badge badge-approved">승인됨</span>',
+
+        rejected:
+          '<span class="status-badge badge-rejected">거절됨</span>'
+      }[req.status] || '';
+
+      return `
+        <div class="req-item">
+
+          ${thumb
+            ? `<img src="${thumb}">`
+            : ''
+          }
+
+          <div class="req-info">
+
+            <div class="req-title">
+              ${escapeHtml(req.title)}
+            </div>
+
+            <div class="req-sub">
+              ${dur}
+            </div>
+
+          </div>
+
+          ${badge}
+
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/* ───────────────── UTIL ───────────────── */
+
+function formatDur(sec) {
+
+  const m =
+    Math.floor(sec / 60);
+
+  const s =
+    sec % 60;
+
+  return `
+    ${m}:${String(s).padStart(2,'0')}
+  `;
+}
+
+function escapeHtml(s) {
+
+  return s
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+let toastTimer;
+
+function showToast(icon, msg, type='') {
+
+  const t =
+    document.getElementById('toast');
+
+  document
+    .getElementById('toastIcon')
+    .textContent = icon;
+
+  document
+    .getElementById('toastMsg')
+    .textContent = msg;
+
+  t.className =
+    `toast ${type} show`;
+
+  clearTimeout(toastTimer);
+
+  toastTimer =
+    setTimeout(() => {
+      t.classList.remove('show');
+    }, 3000);
+}
+
+/* ───────────────── INIT ───────────────── */
+
+checkStatus();
+
+setInterval(checkStatus, 15000);
+
+document.addEventListener('keydown', e => {
+
+  if (
+    e.key === 'Enter' &&
+    !document
+      .getElementById('submitBtn')
+      .disabled
+  ) {
+    submitRequest();
+  }
+});
+</script>
+
+</body>
+</html>
