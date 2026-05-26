@@ -106,6 +106,16 @@ async def get_all_requests(status_filter: str = None) -> list:
         return [dict(r) for r in rows]
 
 
+async def get_request_by_id(request_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM music_requests WHERE id = ?", (request_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
 async def get_approved_requests() -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -219,11 +229,42 @@ async def update_song_rating(request_id: int, rating: int):
         await db.execute(
             """UPDATE music_requests 
                SET rating_sum = rating_sum + ?, 
-                   rating_count = rating_count + 1 
+                   rating_count = rating_count + 1,
+                   five_star_count = five_star_count + (CASE WHEN ? = 5 THEN 1 ELSE 0 END),
+                   low_rating_count = low_rating_count + (CASE WHEN ? IN (1, 2) THEN 1 ELSE 0 END)
                WHERE id = ?""",
-            (rating, request_id)
+            (rating, rating, rating, request_id)
         )
         await db.commit()
+
+
+async def perform_weekly_cleanup(count: int):
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        
+        
+        cursor = await db.execute(
+            """SELECT id, title, play_count, low_rating_count,
+               (CASE WHEN rating_count > 0 THEN CAST(rating_sum AS FLOAT) / rating_count ELSE 0 END) as avg_rating
+               FROM music_requests 
+               WHERE low_rating_count >= 5 
+               ORDER BY avg_rating ASC, play_count ASC 
+               LIMIT ?""",
+            (count,)
+        )
+        targets = await cursor.fetchall()
+        
+        if targets:
+            target_ids = [t["id"] for t in targets]
+            print(f"[Cleanup] 삭제 대상 곡: {[t['title'] for t in targets]}")
+            await db.execute(
+                f"DELETE FROM music_requests WHERE id IN ({','.join(['?']*len(target_ids))})",
+                target_ids
+            )
+            await db.commit()
+            return len(target_ids)
+        return 0
 
 
 async def get_played_history() -> list:

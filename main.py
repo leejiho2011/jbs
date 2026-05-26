@@ -7,22 +7,31 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from config import JWT_EXPIRE_HOURS
+from config import JWT_EXPIRE_HOURS, TEMP_DIR
+import shutil
 from database import (
     init_db, create_music_request, get_all_requests, get_approved_requests,
     update_request_status, delete_request, upsert_schedule,
     get_all_schedules, get_schedule, get_broadcast_logs,
     create_broadcast_log, update_broadcast_log,
     get_played_history, update_song_rating,
-    is_student_blocked, block_student, unblock_student, get_blocked_students
+    is_student_blocked, block_student, unblock_student, get_blocked_students,
+    get_request_by_id
 )
+
+def log_admin_action(ip: str, action: str, details: str):
+    """관리자 활동 로그 기록 (ad.log)"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] [{ip}] {action}: {details}\n"
+    with open("ad.log", "a", encoding="utf-8") as f:
+        f.write(log_entry)
 from auth import authenticate_admin, create_access_token, get_current_admin
-from youtube import is_valid_youtube_url, normalize_youtube_url, fetch_youtube_info, build_optimal_playlist
+from youtube import is_valid_youtube_url, normalize_youtube_url, fetch_youtube_info, build_optimal_playlist, download_youtube_video
 from streamer import streamer
 from scheduler import start_scheduler, stop_scheduler
 
@@ -167,8 +176,10 @@ class LoginBody(BaseModel):
     password: str
 
 @app.post("/api/admin/login")
-async def admin_login(body: LoginBody):
+async def admin_login(body: LoginBody, request: Request):
+    client_ip = request.client.host
     if not authenticate_admin(body.username, body.password):
+        log_admin_action(client_ip, "LOGIN_FAILED", f"User: {body.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="아이디 또는 비밀번호가 틀렸습니다"
@@ -178,6 +189,7 @@ async def admin_login(body: LoginBody):
         {"sub": body.username},
         timedelta(hours=JWT_EXPIRE_HOURS)
     )
+    log_admin_action(client_ip, "LOGIN_SUCCESS", f"User: {body.username}")
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -195,25 +207,37 @@ async def get_requests(
 @app.put("/api/admin/approve/{request_id}")
 async def approve_request(
     request_id: int,
+    request: Request,
     _: dict = Depends(get_current_admin)
 ):
+    song = await get_request_by_id(request_id)
+    title = song["title"] if song else "Unknown"
     await update_request_status(request_id, "approved")
+    log_admin_action(request.client.host, "APPROVE_MUSIC", f"ID: {request_id}, Title: {title}")
     return {"success": True, "message": "승인 완료"}
 
 @app.put("/api/admin/reject/{request_id}")
 async def reject_request(
     request_id: int,
+    request: Request,
     _: dict = Depends(get_current_admin)
 ):
+    song = await get_request_by_id(request_id)
+    title = song["title"] if song else "Unknown"
     await update_request_status(request_id, "rejected")
+    log_admin_action(request.client.host, "REJECT_MUSIC", f"ID: {request_id}, Title: {title}")
     return {"success": True, "message": "거절 완료"}
 
 @app.delete("/api/admin/delete/{request_id}")
 async def delete_request_endpoint(
     request_id: int,
+    request: Request,
     _: dict = Depends(get_current_admin)
 ):
+    song = await get_request_by_id(request_id)
+    title = song["title"] if song else "Unknown"
     await delete_request(request_id)
+    log_admin_action(request.client.host, "DELETE_REQUEST", f"ID: {request_id}, Title: {title}")
     return {"success": True, "message": "삭제 완료"}
 
 class ScheduleBody(BaseModel):
@@ -243,7 +267,9 @@ async def get_schedules(_: dict = Depends(get_current_admin)):
 
 @app.get("/api/admin/broadcast/status")
 async def broadcast_status(_: dict = Depends(get_current_admin)):
-    today = datetime.now().strftime("%Y-%m-%d")
+    from streamer import KST
+    now = datetime.now(KST)
+    today = now.strftime("%Y-%m-%d")
     schedule = await get_schedule(today)
     approved = await get_approved_requests()
 
@@ -252,15 +278,20 @@ async def broadcast_status(_: dict = Depends(get_current_admin)):
         playlist_preview = streamer.active_playlist
     elif schedule:
         try:
-            start_dt = datetime.strptime(f"{today} {schedule['start_time']}", "%Y-%m-%d %H:%M")
-            end_dt   = datetime.strptime(f"{today} {schedule['end_time']}", "%Y-%m-%d %H:%M")
+            # 시간 형식 유연하게 처리 (HH:MM 또는 HH:MM:SS)
+            s_time = schedule['start_time'][:5]
+            e_time = schedule['end_time'][:5]
+            start_dt = datetime.strptime(f"{today} {s_time}", "%Y-%m-%d %H:%M").replace(tzinfo=KST)
+            end_dt   = datetime.strptime(f"{today} {e_time}", "%Y-%m-%d %H:%M").replace(tzinfo=KST)
+            
             if end_dt > start_dt:
                 playlist_preview = build_optimal_playlist(approved, start_dt, end_dt)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Status API] 스케줄 파싱 오류: {e}")
 
     return {
         "is_running": streamer.is_running,
+        "is_downloading": getattr(streamer, "is_downloading", False),
         "current_song": streamer.current_song,
         "today_schedule": schedule,
         "approved_count": len(approved),
@@ -268,12 +299,15 @@ async def broadcast_status(_: dict = Depends(get_current_admin)):
     }
 
 @app.post("/api/admin/broadcast/start")
-async def start_broadcast_manual(_: dict = Depends(get_current_admin)):
+async def start_broadcast_manual(request: Request, _: dict = Depends(get_current_admin)):
+    from streamer import KST
     if streamer.is_running:
         raise HTTPException(400, "이미 방송 중입니다")
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now(KST)
+    today = now.strftime("%Y-%m-%d")
     schedule = await get_schedule(today)
+    
     if not schedule:
         raise HTTPException(400, "오늘 방송 스케줄이 없습니다")
 
@@ -281,16 +315,40 @@ async def start_broadcast_manual(_: dict = Depends(get_current_admin)):
     if not approved:
         raise HTTPException(400, "승인된 곡이 없습니다")
 
-    now = datetime.now()
     start_dt = now
-    end_dt = datetime.strptime(f"{today} {schedule['end_time']}", "%Y-%m-%d %H:%M")
+    try:
+        end_dt = datetime.strptime(f"{today} {schedule['end_time']}", "%Y-%m-%d %H:%M").replace(tzinfo=KST)
+    except Exception:
+        raise HTTPException(400, "스케줄 종료 시간 형식이 잘못되었습니다")
 
     if end_dt <= now:
         raise HTTPException(400, "방송 종료 시간이 이미 지났습니다")
 
     playlist = build_optimal_playlist(approved, start_dt, end_dt)
     if not playlist:
-        raise HTTPException(400, "플레이리스트를 만들 수 없습니다")
+        raise HTTPException(400, "플레이리스트를 만들 수 없습니다 (곡 길이가 부족할 수 있음)")
+
+    # 다운로드 시작 상태 설정
+    streamer.is_downloading = True
+    try:
+        # temp 폴더 정리 및 모든 곡 다운로드
+        if os.path.exists(TEMP_DIR):
+            try:
+                shutil.rmtree(TEMP_DIR)
+            except:
+                pass
+        os.makedirs(TEMP_DIR, exist_ok=True)
+
+        print(f"[Manual Start] {len(playlist)}곡 다운로드 시작...")
+        for song in playlist:
+            video_id = song.get("video_id") or song["youtube_url"].split("=")[-1]
+            file_path = os.path.join(TEMP_DIR, f"{video_id}.mp4")
+            success = await download_youtube_video(song["youtube_url"], file_path)
+            if success:
+                song["local_file"] = os.path.abspath(file_path)
+    finally:
+        # 다운로드 종료 상태 설정
+        streamer.is_downloading = False
 
     log_id = await create_broadcast_log(
         today, now.strftime("%H:%M"),
@@ -298,13 +356,15 @@ async def start_broadcast_manual(_: dict = Depends(get_current_admin)):
         json.dumps([{"title": s["title"]} for s in playlist], ensure_ascii=False)
     )
 
+    log_admin_action(request.client.host, "MANUAL_BROADCAST_START", f"Log ID: {log_id}, Songs: {len(playlist)}")
+
     streamer.broadcast_task = asyncio.create_task(
         streamer.run_playlist(playlist, end_dt, log_id)
     )
 
     return {
         "success": True,
-        "message": f"방송 시작!",
+        "message": f"다운로드 완료 및 방송 시작!",
         "playlist": [{"title": s["title"], "play_at": s["play_at"]} for s in playlist]
     }
 
@@ -330,13 +390,15 @@ class BlockBody(BaseModel):
     reason: Optional[str] = ""
 
 @app.post("/api/admin/block")
-async def block_student_endpoint(body: BlockBody, _: dict = Depends(get_current_admin)):
+async def block_student_endpoint(body: BlockBody, request: Request, _: dict = Depends(get_current_admin)):
     await block_student(body.student_id, body.reason)
+    log_admin_action(request.client.host, "BLOCK_STUDENT", f"Student ID: {body.student_id}, Reason: {body.reason}")
     return {"success": True, "message": f"차단되었습니다"}
 
 @app.delete("/api/admin/unblock/{student_id}")
-async def unblock_student_endpoint(student_id: str, _: dict = Depends(get_current_admin)):
+async def unblock_student_endpoint(student_id: str, request: Request, _: dict = Depends(get_current_admin)):
     await unblock_student(student_id)
+    log_admin_action(request.client.host, "UNBLOCK_STUDENT", f"Student ID: {student_id}")
     return {"success": True, "message": f"해제되었습니다"}
 
 if __name__ == "__main__":

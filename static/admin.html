@@ -491,6 +491,31 @@ button,input{
   color:var(--muted);
 }
 
+#downloadOverlay {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.spinner {
+  width: 50px; height: 50px;
+  border: 4px solid rgba(255,255,255,0.1);
+  border-left-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .toast{
   position:fixed;
   right:24px;
@@ -734,16 +759,19 @@ button,input{
   </div>
 </div>
 
+<div id="downloadOverlay">
+  <div class="spinner"></div>
+  <h2 style="margin-bottom:8px">방송 준비 중</h2>
+  <p style="color:var(--muted)">유튜브 영상을 고화질로 다운로드하고 있습니다...</p>
+  <p style="font-size:0.8rem; color:var(--accent); margin-top:12px;">잠시만 기다려 주세요 (수십 초 소요될 수 있음)</p>
+</div>
+
 <div class="toast" id="adminToast">
   <span id="adminToastIcon"></span>
   <span id="adminToastMsg"></span>
 </div>
 
 <script>
-
-
-
-
 const API = '';
 let jwtToken = sessionStorage.getItem('admin_jwt') || '';
 let allRequests = [];
@@ -773,20 +801,15 @@ async function authFetch(url, options = {}) {
   return res;
 }
 
-
-
 async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
   const p = document.getElementById('loginPass').value;
   const btn = document.getElementById('loginBtn');
   const err = document.getElementById('loginErr');
-
   if (!u || !p) { err.textContent = '아이디와 비밀번호를 입력하세요'; return; }
-
   btn.disabled = true;
   btn.innerHTML = '로그인 중...';
   err.textContent = '';
-
   try {
     const res = await fetch(`${API}/api/admin/login`, {
       method: 'POST',
@@ -794,13 +817,10 @@ async function doLogin() {
       body: JSON.stringify({username:u, password:p})
     });
     const data = await res.json();
-
     if (!res.ok) throw new Error(data.detail || '로그인 실패');
-
     jwtToken = data.access_token;
     sessionStorage.setItem('admin_jwt', jwtToken);
     showAdmin();
-
   } catch(e) {
     err.textContent = e.message;
   } finally {
@@ -830,48 +850,45 @@ function showAdmin() {
   loadBlocked();
   document.getElementById('schedDate').value = new Date().toISOString().split('T')[0];
   setInterval(loadDashboard, 10000);
-  setInterval(loadRequests, 15000);
 }
-
-
 
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('page-'+name).classList.add('active');
-  document.getElementById('nav-'+name).classList.add('active');
+  const target = document.getElementById('page-'+name);
+  if(target) target.classList.add('active');
+  const nav = document.getElementById('nav-'+name);
+  if(nav) nav.classList.add('active');
   if (name === 'broadcast') loadBroadcastDetail();
   if (name === 'blocked') loadBlocked();
 }
 
-
-
 async function loadDashboard() {
   try {
-    const [reqRes, statusRes] = await Promise.all([
-      authFetch('/api/admin/requests'),
-      authFetch('/api/admin/broadcast/status')
-    ]);
-    const reqData    = await reqRes.json();
+    const statusRes = await authFetch('/api/admin/broadcast/status');
+    if (!statusRes.ok) return;
     const statusData = await statusRes.json();
-
-    renderStats(reqData.requests);
+    
+    const reqRes = await authFetch('/api/admin/requests');
+    if (reqRes.ok) {
+      const reqData = await reqRes.json();
+      renderStats(reqData.requests);
+    }
+    
     renderBroadcastStatus(statusData);
     renderPlaylistPreview(statusData.playlist_preview || []);
-
   } catch(e) { console.error('[Dashboard]', e); }
 }
 
 function renderStats(requests) {
+  if(!requests) return;
   const pending  = requests.filter(r => r.status==='pending').length;
   const approved = requests.filter(r => r.status==='approved').length;
   const rejected = requests.filter(r => r.status==='rejected').length;
   const total    = requests.length;
-
   const badge = document.getElementById('pendingBadge');
   if (pending > 0) { badge.style.display=''; badge.textContent=pending; }
   else badge.style.display='none';
-
   document.getElementById('statsGrid').innerHTML = `
     <div class="stat-card blue"><div class="val">${total}</div><div class="lbl">총 신청</div></div>
     <div class="stat-card yellow"><div class="val">${pending}</div><div class="lbl">대기 중</div></div>
@@ -886,53 +903,57 @@ function renderBroadcastStatus(data) {
   const sub   = document.getElementById('adminLiveSub');
   const startBtn = document.getElementById('startBroadcastBtn');
   const stopBtn  = document.getElementById('stopBroadcastBtn');
+  const overlay = document.getElementById('downloadOverlay');
+
+  if (data.is_downloading) {
+    if(overlay) overlay.style.display = 'flex';
+  } else {
+    if(overlay) overlay.style.display = 'none';
+  }
 
   if (data.is_running) {
     dot.className = 'live-indicator on';
     title.textContent = ' 방송 중';
-    sub.textContent = data.current_song ? ` ${data.current_song.title}` : '방송 진행 중';
-    startBtn.disabled = true;
-    stopBtn.disabled  = false;
+    sub.textContent = data.current_song ? `${data.current_song.title}` : '방송 진행 중';
+    if(startBtn) startBtn.disabled = true;
+    if(stopBtn) stopBtn.disabled  = false;
   } else if (data.today_schedule) {
     dot.className = 'live-indicator';
     title.textContent = '방송 대기 중';
     sub.textContent = `${data.today_schedule.start_time} ~ ${data.today_schedule.end_time}`;
-    startBtn.disabled = false;
-    stopBtn.disabled  = true;
+    if(startBtn) startBtn.disabled = false;
+    if(stopBtn) stopBtn.disabled  = true;
   } else {
     dot.className = 'live-indicator';
     title.textContent = '방송 없음';
     sub.textContent = '오늘 스케줄이 없습니다';
-    startBtn.disabled = true;
-    stopBtn.disabled  = true;
+    if(startBtn) startBtn.disabled = true;
+    if(stopBtn) stopBtn.disabled  = true;
   }
 }
 
 function renderPlaylistPreview(playlist) {
   const el = document.getElementById('dashPlaylist');
-  if (!playlist.length) {
+  if (!playlist || !playlist.length) {
     el.innerHTML = '<div class="empty">승인된 곡이 없거나 스케줄이 없습니다</div>';
     return;
   }
   el.innerHTML = playlist.map(s => `
     <div class="playlist-item">
-      <span class="pl-num">${s.order}</span>
+      <span class="pl-num">${s.order || ''}</span>
       <span class="pl-title">${esc(s.title)}</span>
       <span class="pl-time">${s.play_at || ''}</span>
-      <span class="pl-dur">${s.duration_str || ''}</span>
     </div>
   `).join('');
 }
-
-
 
 async function loadRequests() {
   try {
     const res = await authFetch('/api/admin/requests');
     const data = await res.json();
-    allRequests = data.requests;
+    allRequests = data.requests || [];
     renderRequests();
-  } catch(e) { console.error('[Requests]', e); }
+  } catch(e) {}
 }
 
 function filterRequests(status, btn) {
@@ -943,284 +964,142 @@ function filterRequests(status, btn) {
 }
 
 function renderRequests() {
-  const filtered = currentFilter === 'all'
-    ? allRequests
-    : allRequests.filter(r => r.status === currentFilter);
-
+  const filtered = currentFilter === 'all' ? allRequests : allRequests.filter(r => r.status === currentFilter);
   const el = document.getElementById('reqList');
   if (!filtered.length) { el.innerHTML = '<div class="empty">신청 내역이 없습니다</div>'; return; }
-
   el.innerHTML = filtered.map(r => {
-    const match = r.youtube_url.match(/(?:youtu\.be\/|v=)([\w\-]{11})/);
-    const thumb = match ? `https://img.youtube.com/vi/${match[1]}/mqdefault.jpg` : '';
     const dur = r.duration ? `${Math.floor(r.duration/60)}:${String(r.duration%60).padStart(2,'0')}` : '-';
     const badge = {'pending':'<span class="badge b-pending">대기</span>','approved':'<span class="badge b-approved">승인</span>','rejected':'<span class="badge b-rejected">거절</span>'}[r.status] || '';
-    
     let actions = '';
     if (r.status === 'pending') {
-      actions = `
-        <button class="action-btn ab-approve" onclick="approveReq(${r.id})"> 승인</button>
-        <button class="action-btn ab-reject"  onclick="rejectReq(${r.id})"> 거절</button>
-      `;
+      actions = `<button class="action-btn ab-approve" onclick="approveReq(${r.id})"> 승인</button><button class="action-btn ab-reject" onclick="rejectReq(${r.id})"> 거절</button>`;
     }
     actions += `<button class="action-btn ab-block" onclick="blockReq('${r.student_id}')"> 차단</button>`;
-    if (r.status !== 'pending') {
-      actions += `<button class="action-btn ab-delete" onclick="deleteReq(${r.id})"></button>`;
-    }
-
-    return `
-      <div class="req-row" id="req-${r.id}">
-        ${thumb ? `<img class="req-thumb" src="${thumb}" onerror="this.style.display='none'">` : ''}
-        <div class="req-meta">
-          <div class="req-title">${esc(r.title)}</div>
-          <div class="req-sub">학번: ${r.student_id}  ${dur}  ${r.created_at?.slice(5,16)}</div>
-        </div>
-        ${badge}
-        <div class="req-actions">${actions}</div>
+    if (r.status !== 'pending') actions += `<button class="action-btn ab-delete" onclick="deleteReq(${r.id})">삭제</button>`;
+    return `<div class="req-row">
+        <div class="req-meta"><div class="req-title">${esc(r.title)}</div><div class="req-sub">학번: ${r.student_id} | ${dur}</div></div>
+        ${badge}<div class="req-actions">${actions}</div>
       </div>`;
   }).join('');
 }
 
-async function approveReq(id) {
-  await authFetch(`/api/admin/approve/${id}`, {method:'PUT'});
-  toast('', '승인했습니다', 'success');
-  loadRequests();
-  loadDashboard();
-}
-async function rejectReq(id) {
-  await authFetch(`/api/admin/reject/${id}`, {method:'PUT'});
-  toast('', '거절했습니다', 'error');
-  loadRequests();
-}
-async function deleteReq(id) {
-  if (!confirm('삭제하시겠습니까?')) return;
-  await authFetch(`/api/admin/delete/${id}`, {method:'DELETE'});
-  toast('', '삭제했습니다');
-  loadRequests();
-}
-function blockReq(sid) {
-  showPage('blocked');
-  document.getElementById('blockSid').value = sid;
-}
-
-
+async function approveReq(id) { await authFetch(`/api/admin/approve/${id}`, {method:'PUT'}); toast('', '승인됨', 'success'); loadRequests(); loadDashboard(); }
+async function rejectReq(id) { await authFetch(`/api/admin/reject/${id}`, {method:'PUT'}); toast('', '거절됨', 'error'); loadRequests(); }
+async function deleteReq(id) { if (!confirm('삭제하시겠습니까?')) return; await authFetch(`/api/admin/delete/${id}`, {method:'DELETE'}); toast('', '삭제됨'); loadRequests(); }
+function blockReq(sid) { showPage('blocked'); document.getElementById('blockSid').value = sid; }
 
 async function loadSchedules() {
   try {
     const res = await authFetch('/api/admin/schedules');
     const data = await res.json();
-    renderSchedules(data.schedules);
+    renderSchedules(data.schedules || []);
   } catch(e) {}
 }
 
 function renderSchedules(schedules) {
   const el = document.getElementById('scheduleList');
   if (!schedules.length) { el.innerHTML = '<div class="empty">등록된 스케줄이 없습니다</div>'; return; }
-  el.innerHTML = `
-    <table style="width:100%;border-collapse:collapse">
-      <thead>
-        <tr style="border-bottom:1px solid var(--border);color:var(--muted);font-size:.78rem">
-          <th style="padding:8px;text-align:left">날짜</th>
-          <th style="padding:8px;text-align:left">시작</th>
-          <th style="padding:8px;text-align:left">종료</th>
-          <th style="padding:8px;text-align:left">길이</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${schedules.map(s => {
-          const start = s.start_time, end = s.end_time;
-          const diff = calcDiff(start, end);
-          const isToday = s.date === new Date().toISOString().split('T')[0];
-          return `
-            <tr style="border-bottom:1px solid var(--border);${isToday?'color:var(--accent)':''}">
-              <td style="padding:9px">${s.date} ${isToday?'<span style="font-size:.7rem;background:var(--accent);color:#fff;padding:1px 6px;border-radius:10px">오늘</span>':''}</td>
-              <td style="padding:9px;font-family:Space Mono,monospace">${start}</td>
-              <td style="padding:9px;font-family:Space Mono,monospace">${end}</td>
-              <td style="padding:9px;color:var(--muted)">${diff}</td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
-}
-
-function calcDiff(start, end) {
-  try {
-    const [sh,sm] = start.split(':').map(Number);
-    const [eh,em] = end.split(':').map(Number);
-    const diff = (eh*60+em) - (sh*60+sm);
-    if (diff < 0) return '-';
-    return `${Math.floor(diff/60)}시간 ${diff%60}분`;
-  } catch { return '-'; }
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse">
+      <thead><tr style="border-bottom:1px solid var(--border);color:var(--muted);font-size:.78rem"><th style="padding:8px;text-align:left">날짜</th><th style="padding:8px;text-align:left">시작</th><th style="padding:8px;text-align:left">종료</th></tr></thead>
+      <tbody>${schedules.map(s => `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:9px">${s.date}</td><td style="padding:9px">${s.start_time}</td><td style="padding:9px">${s.end_time}</td>
+            </tr>`).join('')}</tbody></table>`;
 }
 
 async function saveSchedule() {
   const date  = document.getElementById('schedDate').value;
   const start = document.getElementById('schedStart').value;
   const end   = document.getElementById('schedEnd').value;
-  if (!date || !start || !end) { toast('', '날짜와 시간을 모두 입력하세요', 'error'); return; }
-  if (start >= end) { toast('', '종료 시간이 시작 시간보다 늦어야 합니다', 'error'); return; }
-
+  if (!date || !start || !end) return toast('', '모두 입력하세요', 'error');
   try {
-    const res = await authFetch('/api/admin/schedule', {
-      method: 'POST',
-      body: JSON.stringify({date, start_time:start, end_time:end})
-    });
-    if (res.ok) { toast('', '스케줄 저장 완료!', 'success'); loadSchedules(); loadDashboard(); }
-  } catch(e) { toast('', '저장 실패', 'error'); }
+    const res = await authFetch('/api/admin/schedule', { method: 'POST', body: JSON.stringify({date, start_time:start, end_time:end}) });
+    if (res.ok) { toast('', '저장 완료!', 'success'); loadSchedules(); loadDashboard(); }
+  } catch(e) {}
 }
-
-
 
 async function loadBlocked() {
   try {
     const res = await authFetch('/api/admin/blocked');
     const data = await res.json();
-    renderBlocked(data.blocked);
+    renderBlocked(data.blocked || []);
   } catch(e) {}
 }
 
 function renderBlocked(list) {
   const el = document.getElementById('blockedList');
   if (!list.length) { el.innerHTML = '<div class="empty">차단된 학번이 없습니다</div>'; return; }
-  el.innerHTML = list.map(b => `
-    <div class="blocked-item">
-      <span class="bl-id">${b.student_id}</span>
-      <span class="bl-reason">${esc(b.reason || '사유 없음')}</span>
-      <span style="font-size:0.75rem; color:var(--muted); margin-right:12px;">${b.created_at.slice(0,10)}</span>
-      <button class="action-btn ab-delete" onclick="unblockStudent('${b.student_id}')">해제</button>
-    </div>
-  `).join('');
+  el.innerHTML = list.map(b => `<div class="blocked-item"><span class="bl-id">${b.student_id}</span><span class="bl-reason">${esc(b.reason)}</span><button class="action-btn ab-delete" onclick="unblockStudent('${b.student_id}')">해제</button></div>`).join('');
 }
 
 async function saveBlock() {
   const sid = document.getElementById('blockSid').value.trim();
   const reason = document.getElementById('blockReason').value.trim();
-  if (!/^\d{5}$/.test(sid)) { toast('', '학번 5자리를 입력하세요', 'error'); return; }
-
+  if (!/^\d{5}$/.test(sid)) return toast('', '학번 5자리 입력', 'error');
   try {
-    const res = await authFetch('/api/admin/block', {
-      method: 'POST',
-      body: JSON.stringify({student_id: sid, reason})
-    });
-    if (res.ok) {
-      toast('', '차단 완료', 'success');
-      document.getElementById('blockSid').value = '';
-      document.getElementById('blockReason').value = '';
-      loadBlocked();
-    }
-  } catch(e) { toast('', '차단 실패', 'error'); }
+    const res = await authFetch('/api/admin/block', { method: 'POST', body: JSON.stringify({student_id: sid, reason}) });
+    if (res.ok) { toast('', '차단 완료', 'success'); loadBlocked(); }
+  } catch(e) {}
 }
 
 async function unblockStudent(sid) {
-  if (!confirm(`${sid} 학번 차단을 해제하시겠습니까?`)) return;
+  if (!confirm('해제할까요?')) return;
   try {
     const res = await authFetch(`/api/admin/unblock/${sid}`, {method:'DELETE'});
-    if (res.ok) { toast('', '차단 해제됨'); loadBlocked(); }
-  } catch(e) { toast('', '해제 실패', 'error'); }
+    if (res.ok) { toast('', '해제됨'); loadBlocked(); }
+  } catch(e) {}
 }
-
-
 
 async function loadBroadcastDetail() {
   try {
     const res = await authFetch('/api/admin/broadcast/status');
     const d = await res.json();
     const el = document.getElementById('broadcastDetailCard');
-    el.innerHTML = `
-      <h3>현재 방송 상태</h3>
-      <div style="margin:12px 0;padding:14px;background:var(--surface);border-radius:8px">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <div class="live-indicator ${d.is_running?'on':''}"></div>
-          <span style="font-weight:600">${d.is_running ? '방송 중' : '방송 없음'}</span>
-        </div>
-        ${d.current_song ? `<div style="font-size:.85rem;color:var(--muted)">현재 곡: ${esc(d.current_song.title)}</div>` : ''}
-        ${d.today_schedule ? `<div style="font-size:.85rem;color:var(--muted);margin-top:4px">오늘 스케줄: ${d.today_schedule.start_time} ~ ${d.today_schedule.end_time}</div>` : ''}
-      </div>
-      <div style="margin-top:8px;font-size:.82rem;color:var(--muted)">
-        승인된 곡: ${d.approved_count}곡 /
-        플레이리스트: ${(d.playlist_preview||[]).length}곡 선정
-      </div>
-      <div style="display:flex;gap:8px;margin-top:16px">
-        <button class="btn btn-green" onclick="startBroadcast()" ${d.is_running?'disabled':''}> 수동 방송 시작</button>
-        <button class="btn btn-red"   onclick="stopBroadcast()"  ${!d.is_running?'disabled':''}> 방송 중지</button>
-      </div>
-    `;
+    el.innerHTML = `<h3>현재 방송 상태</h3><div style="margin:12px 0;padding:14px;background:var(--surface);border-radius:8px"><div style="display:flex;gap:8px;align-items:center"><div class="live-indicator ${d.is_running?'on':''}"></div><span>${d.is_running?'방송 중':'방송 없음'}</span></div>${d.current_song?`<div>곡: ${esc(d.current_song.title)}</div>`:''}</div><div style="display:flex;gap:8px"><button class="btn btn-green" onclick="startBroadcast()">수동 시작</button><button class="btn btn-red" onclick="stopBroadcast()">중지</button></div>`;
   } catch(e) {}
 }
 
 async function startBroadcast() {
+  const overlay = document.getElementById('downloadOverlay');
+  if(overlay) overlay.style.display = 'flex';
   try {
     const res = await authFetch('/api/admin/broadcast/start', {method:'POST'});
-    const d = await res.json();
-    if (res.ok) { toast('', `방송 시작! ${d.playlist?.length||0}곡`, 'success'); loadDashboard(); loadBroadcastDetail(); }
-    else toast('', d.detail || '시작 실패', 'error');
-  } catch(e) { toast('', e.message, 'error'); }
+    if (res.ok) { toast('', '방송 시작!', 'success'); loadDashboard(); }
+    else { const d = await res.json(); toast('', d.detail || '실패', 'error'); }
+  } catch(e) { toast('', '오류 발생', 'error'); }
+  finally { if(overlay) overlay.style.display = 'none'; }
 }
 
 async function stopBroadcast() {
-  if (!confirm('방송을 중지하시겠습니까?')) return;
+  if (!confirm('중지할까요?')) return;
   try {
     const res = await authFetch('/api/admin/broadcast/stop', {method:'POST'});
-    if (res.ok) { toast('', '방송이 중지됐습니다'); loadDashboard(); loadBroadcastDetail(); }
-  } catch(e) { toast('', e.message, 'error'); }
+    if (res.ok) { toast('', '중지됨'); loadDashboard(); }
+  } catch(e) {}
 }
-
-
 
 async function loadLogs() {
   try {
     const res = await authFetch('/api/admin/logs');
     const data = await res.json();
     const el = document.getElementById('logList');
-    if (!data.logs.length) { el.innerHTML = '<div class="empty">방송 로그가 없습니다</div>'; return; }
-    el.innerHTML = data.logs.map(l => {
-      const statusColor = {running:'var(--yellow)',finished:'var(--green)',error:'var(--red)'}[l.status] || 'var(--muted)';
-      let playlist = [];
-      try { playlist = JSON.parse(l.playlist); } catch {}
-      return `
-        <div style="border-bottom:1px solid var(--border);padding:12px 0">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-weight:600">${l.date}</span>
-            <span style="color:${statusColor};font-size:.8rem;text-transform:uppercase;font-weight:700">${l.status}</span>
-          </div>
-          <div style="font-size:.82rem;color:var(--muted)">
-            ${l.start_time} ~ ${l.end_time || '-'}  ${playlist.length}곡
-          </div>
-        </div>`;
-    }).join('');
+    if (!data.logs.length) { el.innerHTML = '<div class="empty">로그 없음</div>'; return; }
+    el.innerHTML = data.logs.map(l => `<div style="padding:10px 0;border-bottom:1px solid var(--border)">${l.date} | ${l.status} | ${l.start_time}</div>`).join('');
   } catch(e) {}
 }
 
-
-
-function esc(s='') {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
+function esc(s='') { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 let toastTm;
 function toast(icon, msg, type='') {
   const el = document.getElementById('adminToast');
-  document.getElementById('adminToastIcon').textContent = icon;
   document.getElementById('adminToastMsg').textContent = msg;
   el.className = `toast ${type} show`;
   clearTimeout(toastTm);
   toastTm = setTimeout(() => el.classList.remove('show'), 3000);
 }
 
-
-if (jwtToken && !isTokenExpired(jwtToken)) {
-  showAdmin();
-} else {
-  jwtToken = '';
-  sessionStorage.removeItem('admin_jwt');
-  showLogin();
-}
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && document.getElementById('loginScreen').style.display !== 'none') doLogin();
-});
+if (jwtToken && !isTokenExpired(jwtToken)) showAdmin();
+else { sessionStorage.removeItem('admin_jwt'); showLogin(); }
 </script>
-
-<div style="text-align:center; padding:20px; color:var(--muted); font-size:0.8rem;">Copyright &copy; gm</div>
+<div style="text-align:center; padding:20px; color:var(--muted); font-size:0.8rem;">Copyright 2026. 이지호</div>
 </body>
 </html>

@@ -17,16 +17,16 @@ security = HTTPBearer()
 
 
 def verify_password(plain_password: str, stored_password: str) -> bool:
-    
+    """비밀번호 검증 (안전한 해시 비교만 수행)"""
     try:
         return pwd_context.verify(plain_password, stored_password)
     except Exception:
-        
-        return plain_password == stored_password
+        # 평문 비교 로직 삭제 (보안 강화)
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+...
 
 
 def authenticate_admin(username: str, password: str) -> bool:

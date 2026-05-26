@@ -1,401 +1,230 @@
 
-
 import asyncio
 import subprocess
 import json
 import os
 import platform
+import signal
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
+
+from config import STREAM_QUALITY
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 class StreamerManager:
 
     def __init__(self):
-
-        self.is_running = False
         self.current_song = None
         self.active_playlist = []
         self.mpv_process = None
         self.stop_event = asyncio.Event()
+        self.is_downloading = False
 
         self.is_windows = platform.system() == "Windows"
-
-        
         if self.is_windows:
             self.ipc_path = r"\\.\pipe\mpvsocket"
         else:
             self.ipc_path = "/tmp/mpvsocket"
 
-    
-    
-    
-    def start_mpv(self):
+    @property
+    def is_running(self):
+        """mpv 프로세스가 살아있는지 확인"""
+        return self.mpv_process is not None and self.mpv_process.poll() is None
 
-        
-        if not self.is_windows:
-
+    def _cleanup_old_mpv(self):
+        """기존 mpv 프로세스 강제 종료"""
+        if self.mpv_process:
             try:
-                if os.path.exists(self.ipc_path):
-                    os.remove(self.ipc_path)
-            except:
-                pass
+                if self.is_windows:
+                    self.mpv_process.kill()
+                else:
+                    os.killpg(os.getpgid(self.mpv_process.pid), signal.SIGKILL)
+            except: pass
+        
+        if not self.is_windows and os.path.exists(self.ipc_path):
+            try: os.remove(self.ipc_path)
+            except: pass
+
+    def start_mpv(self):
+        """mpv 실행"""
+        self._cleanup_old_mpv()
+
+        # 시스템별 mpv 경로 설정
+        if self.is_windows:
+            # mpv 폴더 내의 mpv.exe 경로 (절대 경로로 변환)
+            mpv_path = os.path.abspath(os.path.join("mpv", "mpv.exe"))
+            # 만약 해당 경로에 파일이 없으면 시스템 환경변수의 mpv 사용
+            if not os.path.exists(mpv_path):
+                mpv_path = "mpv"
+        else:
+            mpv_path = "mpv"
 
         cmd = [
-            "mpv",
-            
+            mpv_path,
             "--fs=yes",
-            
             "--idle=yes",
             "--force-window=yes",
-            "--keep-open=yes",
-
-            
+            "--keep-open=no", # 곡 종료 시 즉시 Idle 상태로 전환되도록 함
             "--pause=no",
-
-            
             "--cache=yes",
-            "--cache-secs=20",
-
-            "--cache-pause=no",
-
-            "--prefetch-playlist=yes",
-
-            "--demuxer-max-bytes=50M",
-            "--demuxer-max-back-bytes=10M",
-
-            
+            "--cache-secs=30",
+            "--demuxer-max-bytes=150M",
             "--geometry=1280x720+0+0",
-
-            
             f"--input-ipc-server={self.ipc_path}",
-
             "--really-quiet"
         ]
 
         try:
-
             self.mpv_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                preexec_fn=None if self.is_windows else os.setsid
             )
-
+            print(f"[Streamer] mpv 프로세스 시작됨 ({mpv_path})")
             return True
-
         except Exception as e:
-
             print("[Streamer] mpv 실행 실패:", e)
             return False
 
-    
-    
-    
     async def send_command(self, command):
-
         try:
-
-            
-            
-            
             if self.is_windows:
-
-                with open(self.ipc_path, "r+", encoding="utf-8") as pipe:
-
-                    pipe.write(json.dumps(command) + "\n")
-                    pipe.flush()
-
-                    response = pipe.readline()
-
-                    if response:
-                        return json.loads(response)
-
-                    return None
-
-            
-            
-            
+                for _ in range(5):
+                    try:
+                        with open(self.ipc_path, "r+", encoding="utf-8") as pipe:
+                            pipe.write(json.dumps(command) + "\n")
+                            pipe.flush()
+                            return json.loads(pipe.readline())
+                    except: await asyncio.sleep(0.1)
+                return None
             else:
-
-                reader, writer = await asyncio.open_unix_connection(
-                    self.ipc_path
-                )
-
-                writer.write(
-                    (json.dumps(command) + "\n").encode()
-                )
-
+                reader, writer = await asyncio.open_unix_connection(self.ipc_path)
+                writer.write((json.dumps(command) + "\n").encode())
                 await writer.drain()
-
                 response = await reader.readline()
-
                 writer.close()
                 await writer.wait_closed()
+                return json.loads(response.decode()) if response else None
+        except: return None
 
-                if response:
-                    return json.loads(response.decode())
-
-                return None
-
-        except Exception as e:
-
-            print("[Streamer] IPC 오류:", e)
-            return None
-
-    
-    
-    
     async def load_video(self, video_url):
-
-        
+        """파일 로드 및 재생"""
         for _ in range(50):
-
-            if os.path.exists(self.ipc_path):
-                break
-
+            if self.is_windows or os.path.exists(self.ipc_path): break
             await asyncio.sleep(0.1)
 
-        
         await self.send_command({
-            "command": [
-                "loadfile",
-                video_url,
-                "replace"
-            ]
+            "command": ["loadfile", video_url, "replace"]
+        })
+        await self.send_command({
+            "command": ["set_property", "pause", False]
         })
 
-        
-        await self.send_command({
-            "command": [
-                "set_property",
-                "pause",
-                False
-            ]
-        })
-
-    
-    
-    
     async def wait_until_finished(self, end_time):
-
-        last_time = -1
-        same_count = 0
-
+        """mpv의 상태(Idle -> Playing -> Idle) 변화를 감시하여 곡 종료를 판별"""
         
-        for _ in range(100):
-            if self.stop_event.is_set(): return
-            result = await self.send_command({"command": ["get_property", "playback-time"]})
-            if result and result.get("data", 0) > 0:
+        # 1. 재생 시작 확인 (Idle 상태가 해제될 때까지 대기)
+        started = False
+        for _ in range(60): # 최대 6초
+            if self.stop_event.is_set() or not self.is_running: return
+            res = await self.send_command({"command": ["get_property", "idle-active"]})
+            # idle-active가 False이면 무언가 재생을 시작했다는 의미
+            if res and res.get("data") == False:
+                started = True
                 break
             await asyncio.sleep(0.1)
+        
+        if not started:
+            print("[Streamer] 재생 시작 감지 실패 (Timeout)")
+            return
 
+        # 2. [핵심] 재생 초기 유예 기간 (2.5초)
+        # 곡이 막 시작된 후 로딩/버퍼링으로 인해 일시적으로 idle이 되는 것을 완전히 무시함
+        await asyncio.sleep(2.5)
+
+        # 3. 재생 종료 대기 (다시 Idle 상태가 되거나 EOF에 도달할 때까지)
         while True:
+            if self.stop_event.is_set() or not self.is_running: break
+            if datetime.now(KST) >= end_time: break
 
-            if self.stop_event.is_set():
-                break
-
-            if datetime.now() >= end_time:
-                break
-
-            if self.mpv_process.poll() is not None:
-                raise RuntimeError("mpv 종료됨")
-
-            result = await self.send_command({
-                "command": [
-                    "get_property",
-                    "playback-time"
-                ]
-            })
-
-            current_time = None
-
-            if result:
-                current_time = result.get("data")
-
+            # mpv 상태 확인
+            idle_res = await self.send_command({"command": ["get_property", "idle-active"]})
+            eof_res = await self.send_command({"command": ["get_property", "eof-reached"]})
             
-            if current_time is None:
+            # 다시 Idle 상태가 되었거나, 파일 끝에 도달했으면 곡 종료 시도
+            if (idle_res and idle_res.get("data") == True) or (eof_res and eof_res.get("data") == True):
+                # 일시적인 멈춤인지 실제 종료인지 0.5초 후 재확인
+                await asyncio.sleep(0.5)
+                final_res = await self.send_command({"command": ["get_property", "idle-active"]})
+                if final_res and final_res.get("data") == True:
+                    print("[Streamer] 곡 재생 완료 감지")
+                    break
 
-                await asyncio.sleep(0.1)
-                continue
+            await asyncio.sleep(0.2)
 
-            
-            if current_time == last_time:
-
-                same_count += 1
-
-            else:
-
-                same_count = 0
-
-            last_time = current_time
-
-            
-            if same_count >= 100:
-                break
-
-            await asyncio.sleep(0.03)
-
-    
-    
-    
     async def run_playlist(self, playlist, end_time, log_id):
-
         from database import update_broadcast_log
-
-        self.is_running = True
         self.active_playlist = playlist
         self.stop_event.clear()
 
         try:
-
-            if not self.start_mpv():
-                return
-
+            if not self.start_mpv(): return
             
-            await asyncio.sleep(1)
-
-            
-            preload_task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.get_stream_url,
-                    playlist[0]["youtube_url"]
-                )
-            )
-
-            
-            
-            
+            # 준비 화면 표시
+            start_img = "img/start.png"
+            if os.path.exists(start_img):
+                await self.load_video(os.path.abspath(start_img))
+            elif os.path.exists("static/loading.png"):
+                await self.load_video(os.path.abspath("static/loading.png"))
+            await asyncio.sleep(2)
 
             for i, song in enumerate(playlist):
-
-                if self.stop_event.is_set():
-                    break
-
-                if datetime.now() >= end_time:
-                    break
+                if self.stop_event.is_set() or not self.is_running: break
+                if datetime.now(KST) >= end_time: break
 
                 self.current_song = song
+                target = song.get("local_file") or await asyncio.to_thread(self.get_stream_url, song["youtube_url"])
 
-                
-                stream_url = await preload_task
-
-                if not stream_url:
+                if not target:
+                    print(f"[Streamer] 소스 없음 스킵: {song['title']}")
                     continue
 
+                print(f"[Streamer] 재생 시작 ({i+1}/{len(playlist)}): {song['title']}")
+                await self.load_video(target)
                 
-                if i + 1 < len(playlist):
-
-                    next_song = playlist[i + 1]
-
-                    preload_task = asyncio.create_task(
-                        asyncio.to_thread(
-                            self.get_stream_url,
-                            next_song["youtube_url"]
-                        )
-                    )
-
-                print(f"[Streamer] 재생 시작: {song['title']}")
-
-                
-                await self.load_video(stream_url)
-
-                
+                # 핵심: mpv 상태를 보고 다음 곡으로 넘어갈지 판단
                 await self.wait_until_finished(end_time)
 
-                
                 from database import increment_play_count
                 asyncio.create_task(increment_play_count(song["id"]))
 
-        finally:
+            # 모든 곡 종료 후 잠시 대기
+            await asyncio.sleep(2)
 
+        finally:
             self.stop_broadcast()
             self.active_playlist = []
+            await update_broadcast_log(log_id, "finished", datetime.now(KST).strftime("%H:%M:%S"))
 
-            await update_broadcast_log(
-                log_id,
-                "finished",
-                datetime.now().strftime("%H:%M:%S")
-            )
-
-    
-    
-    
     def stop_broadcast(self):
-
+        """방송 중지 및 프로세스 정리"""
         self.stop_event.set()
-
-        if self.mpv_process:
-
-            self.mpv_process.terminate()
-
-            try:
-                self.mpv_process.wait(timeout=3)
-
-            except subprocess.TimeoutExpired:
-                self.mpv_process.kill()
-
+        self._cleanup_old_mpv()
         self.mpv_process = None
         self.current_song = None
 
-        
-        if not self.is_windows:
-
-            try:
-                if os.path.exists(self.ipc_path):
-                    os.remove(self.ipc_path)
-            except:
-                pass
-
-    
-    
-    
     def get_stream_url(self, youtube_url) -> Optional[str]:
-
         from config import YTDLP_COOKIES
-
-        cmd = [
-            "yt-dlp",
-
-            "-f", "best",
-
-            "--force-ipv4",
-
-            "--get-url",
-
-            "--no-playlist"
-        ]
-
-        if YTDLP_COOKIES:
-            cmd += ["--cookies", YTDLP_COOKIES]
-
+        cmd = ["yt-dlp", "-f", STREAM_QUALITY, "--get-url", "--no-playlist", "--force-ipv4"]
+        if YTDLP_COOKIES: cmd += ["--cookies", YTDLP_COOKIES]
         cmd.append(youtube_url)
-
         try:
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-
-            if result.returncode == 0:
-
-                return result.stdout.strip().split("\n")[0]
-
-            print(result.stderr)
-
-            return None
-
-        except Exception as e:
-
-            print("[Streamer] yt-dlp 오류:", e)
-
-            return None
-
-
-
-
-
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            return result.stdout.strip() if result.returncode == 0 else None
+        except: return None
 
 streamer = StreamerManager()

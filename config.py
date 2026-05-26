@@ -45,7 +45,16 @@ FRP_SUBDOMAIN = os.getenv("FRP_SUBDOMAIN", "music")
 
 
 
+# ... (기존 코드)
 SONG_BUFFER_SECONDS = int(os.getenv("SONG_BUFFER_SECONDS", 10))
 
+# 스트리밍 화질 설정 (기본값: 1080p 이하 최상질)
+STREAM_QUALITY = os.getenv("STREAM_QUALITY", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best")
 
-MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", 50))
+CLEANUP_COUNT = int(os.getenv("CLEANUP_COUNT", "2"))
+# ... (기존 코드)
+CLEANUP_DAY = os.getenv("CLEANUP_DAY", "mon").lower()
+CLEANUP_HOUR = int(os.getenv("CLEANUP_HOUR", "4"))
+
+TEMP_DIR = "temp"
+

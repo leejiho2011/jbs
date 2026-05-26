@@ -2,9 +2,11 @@
 import re
 import subprocess
 import json
+import os
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
-from config import YTDLP_COOKIES, SONG_BUFFER_SECONDS
+from config import YTDLP_COOKIES, SONG_BUFFER_SECONDS, STREAM_QUALITY
 
 
 YOUTUBE_URL_PATTERN = re.compile(
@@ -70,6 +72,45 @@ async def fetch_youtube_info(url: str) -> Optional[dict]:
         return None
 
 
+async def download_youtube_video(url: str, output_path: str) -> bool:
+    """유튜브 영상을 로컬 temp 폴더에 고화질로 다운로드 (mp4 병합)"""
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # mp4로 병합하여 저장 (비디오+오디오 합치기)
+        cmd = [
+            "yt-dlp",
+            "-f", STREAM_QUALITY,
+            "--merge-output-format", "mp4",
+            "-o", output_path,
+            "--no-playlist",
+            "--force-ipv4"
+        ]
+
+        if YTDLP_COOKIES:
+            cmd += ["--cookies", YTDLP_COOKIES]
+
+        cmd.append(url)
+
+        print(f"[Download] 시작: {url}")
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE
+        )
+        _, stderr = await process.communicate()
+
+        if process.returncode == 0:
+            print(f"[Download] 완료: {output_path}")
+            return True
+        else:
+            print(f"[Download] 실패: {stderr.decode()[:200]}")
+            return False
+    except Exception as e:
+        print(f"[Download] 예외 발생: {e}")
+        return False
+
+
 def seconds_to_hms(seconds: int) -> str:
     
     h = seconds // 3600
@@ -93,24 +134,22 @@ def build_optimal_playlist(
 
     
     processed_songs = []
-    max_avg_rating = 0.0
-    
     for song in approved_songs:
-        r_sum = song.get("rating_sum", 0)
-        r_count = song.get("rating_count", 0)
-        avg = float(r_sum) / r_count if r_count > 0 else 0.0
-        song["avg_rating"] = avg
-        if avg > max_avg_rating:
-            max_avg_rating = avg
+        f_count = song.get("five_star_count", 0)
+        p_count = song.get("play_count", 0)
+        
+        # 가중치 점수 계산 (최대 1.0)
+        # 10%: 5명 이상이 5점을 남긴 경우
+        rating_score = 0.1 if f_count >= 5 else 0.0
+        # 90%: 재생 횟수가 적을수록 높은 점수
+        play_score = 0.9 / (p_count + 1)
+        
+        song["selection_score"] = rating_score + play_score
         processed_songs.append(song)
 
     
-    
-    processed_songs.sort(key=lambda x: (
-        not (x["avg_rating"] == max_avg_rating and max_avg_rating > 0), 
-        x.get("play_count", 0),
-        x.get("approved_at", "")
-    ))
+    # 점수 내림차순 정렬 (높은 점수가 우선)
+    processed_songs.sort(key=lambda x: x["selection_score"], reverse=True)
 
     playlist = []
     used_seconds = 0
@@ -145,7 +184,7 @@ def build_optimal_playlist(
         used_seconds += song_total
 
     remaining_seconds = total_seconds - used_seconds
-    print(f"[Playlist] {len(playlist)}곡 선정, "
+    print(f"[Playlist] {len(playlist)}곡 선정 완료, "
           f"총 {seconds_to_hms(used_seconds)} / {seconds_to_hms(total_seconds)}, "
           f"여유 시간: {seconds_to_hms(remaining_seconds)}")
 
