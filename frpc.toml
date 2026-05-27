@@ -1,0 +1,10 @@
+server_addr = XXXXX(사용 결정후 제공)
+serverPort = 7001
+auth.token = (사용 결정후 제공)
+
+[[proxies]]
+name = "music-web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8000
+remotePort = 80

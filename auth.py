@@ -1,5 +1,5 @@
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -17,16 +17,21 @@ security = HTTPBearer()
 
 
 def verify_password(plain_password: str, stored_password: str) -> bool:
-    """비밀번호 검증 (안전한 해시 비교만 수행)"""
+    """비밀번호 검증 (해시 우선, 실패 시 평문 비교 fallback)"""
     try:
-        return pwd_context.verify(plain_password, stored_password)
+        # stored_password가 유효한 해시인지 확인
+        if pwd_context.identify(stored_password):
+            return pwd_context.verify(plain_password, stored_password)
     except Exception:
-        # 평문 비교 로직 삭제 (보안 강화)
-        return False
+        pass
+    
+    # 해시가 아니거나 검증 실패 시 평문 비교 (보안상 권장되지 않으나 현재 설정을 위해 유지)
+    return plain_password == stored_password
 
 
 def get_password_hash(password: str) -> str:
-...
+    """비밀번호 해싱"""
+    return pwd_context.hash(password)
 
 
 def authenticate_admin(username: str, password: str) -> bool:
@@ -39,13 +44,14 @@ def authenticate_admin(username: str, password: str) -> bool:
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     
     to_encode = data.copy()
-    expire = datetime.utcnow() + (
+    now = datetime.now(timezone.utc)
+    expire = now + (
         expires_delta if expires_delta
         else timedelta(hours=JWT_EXPIRE_HOURS)
     )
     to_encode.update({
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": now,
         "type": "admin_access"
     })
     return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
