@@ -35,10 +35,17 @@ def get_password_hash(password: str) -> str:
 
 
 def authenticate_admin(username: str, password: str) -> bool:
-    
+    """관리자 인증 - 평문 또는 해시된 비밀번호 모두 지원"""
     if username != ADMIN_USERNAME:
         return False
-    return verify_password(password, ADMIN_PASSWORD)
+    
+    # ADMIN_PASSWORD가 해시값이면 해시 비교, 평문이면 직접 비교
+    if ADMIN_PASSWORD.startswith('$'):
+        # 해시된 비밀번호
+        return verify_password(password, ADMIN_PASSWORD)
+    else:
+        # 평문 비밀번호 (개발/테스트용)
+        return password == ADMIN_PASSWORD
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
